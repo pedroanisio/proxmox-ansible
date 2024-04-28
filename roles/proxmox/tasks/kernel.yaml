@@ -1,0 +1,12 @@
+## Install Kernel Headers
+## Use this to make sure the kernel headers are installed before installing the NVIDIA driver
+## Pedro Anisio Silva
+## 2023.02.12
+
+---
+- name: Add PVE Kernel Headers package
+  apt:
+    name: pve-headers
+    state: latest
+  tags: kernel
+

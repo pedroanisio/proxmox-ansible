@@ -1,0 +1,205 @@
+# proxmox-ansible/roles/proxmox/tasks/init.yaml
+# Prepare the Proxmox VE hosts for operation
+# Ready for Proxmox running version > 8 (bookworm)
+---
+
+- name: Set correct Proxmox VE sources
+  copy:
+    dest: /etc/apt/sources.list
+    content: |
+      deb http://deb.debian.org/debian bookworm main contrib
+      deb http://deb.debian.org/debian bookworm-updates main contrib
+      deb http://security.debian.org/debian-security bookworm-security main contrib
+    owner: root
+    group: root
+    mode: '0644'
+
+- name: Set no-bookworm-firmware configuration
+  copy:
+    dest: /etc/apt/apt.conf.d/no-bookworm-firmware.conf
+    content: 'APT::Get::Update::SourceListWarnings::NonFreeFirmware "false";'
+    owner: root
+    group: root
+    mode: '0644'
+
+- name: Disable 'pve-enterprise' repository
+  copy:
+    dest: /etc/apt/sources.list.d/pve-enterprise.list
+    content: '# deb https://enterprise.proxmox.com/debian/pve bookworm pve-enterprise'
+    owner: root
+    group: root
+    mode: '0644'
+
+- name: Enable 'pve-no-subscription' repository
+  copy:
+    dest: /etc/apt/sources.list.d/pve-install-repo.list
+    content: 'deb http://download.proxmox.com/debian/pve bookworm pve-no-subscription'
+    owner: root
+    group: root
+    mode: '0644'
+
+- name: Set 'ceph package repositories' (all entries are commented out)
+  copy:
+    dest: /etc/apt/sources.list.d/ceph.list
+    content: |
+      # deb http://download.proxmox.com/debian/ceph-quincy bookworm enterprise
+      # deb http://download.proxmox.com/debian/ceph-quincy bookworm no-subscription
+      # deb http://download.proxmox.com/debian/ceph-reef bookworm enterprise
+      # deb http://download.proxmox.com/debian/ceph-reef bookworm no-subscription
+    owner: root
+    group: root
+    mode: '0644'
+
+- name: Add 'pvetest' repository (disabled)
+  copy:
+    dest: /etc/apt/sources.list.d/pvetest-for-beta.list
+    content: '# deb http://download.proxmox.com/debian/pve bookworm pvetest'
+    owner: root
+    group: root
+    mode: '0644'        
+
+- name: Update and dist-upgrade Proxmox VE
+  ansible.builtin.apt:
+    update_cache: yes
+    upgrade: dist
+
+- name: Install sudo if it's not already installed
+  package:
+    name: sudo
+    state: present
+
+- name: Create a new user with a home directory if it does not exist
+  user:
+    name: "{{ vault_username }}"
+    password: "{{ vault_password | password_hash('sha512') }}"
+    create_home: yes
+  when: username is not defined
+
+- name: Set password for the user
+  user:
+    name: "{{ vault_username }}"
+    password: "{{ vault_password | password_hash('sha512') }}"
+    update_password: on_create
+
+- name: Ensure sudo can be used by the user without a password
+  lineinfile:
+    path: "/etc/sudoers.d/{{ vault_username }}"
+    line: "{{ vault_username }} ALL=(ALL) NOPASSWD: ALL"
+    create: yes
+    validate: 'visudo -cf %s'
+
+- name: Set correct permissions for the sudoers file
+  file:
+    path: "/etc/sudoers.d/{{ vault_username }}"
+    mode: '0440'
+
+- name: Copy SSH public key to Proxmox
+  authorized_key:
+    user: "{{ vault_username }}"
+    state: present
+    key: "{{ lookup('file', '/home/pals/.ssh/id_rsa.pub') }}"
+
+- name: Check if ip_conntrack module can be loaded
+  ansible.builtin.shell: "modinfo ip_conntrack || echo 'module_not_found'"
+  register: modinfo
+  ignore_errors: true
+
+- name: Create TCP/IP stack hardening sysctl file
+  ansible.builtin.copy:
+    dest: /etc/sysctl.d/80_tcp_hardening.conf
+    src: 80_tcp_hardening.conf
+    remote_src: false
+    owner: root
+    group: root
+    mode: '0644'
+
+- name: Create Memory Optimizations Sysctl File
+  copy:
+    dest: /etc/sysctl.d/85_memory_optimizations.conf
+    src: 85_memory_optimizations.conf
+    remote_src: false    
+    owner: root
+    group: root
+    mode: '0644'
+
+- name: Create Kernel Optimizations Sysctl File
+  copy:
+    dest: /etc/sysctl.d/85_kernel_optimizations.conf
+    src: 85_kernel_optimizations.conf
+    remote_src: false
+    owner: root
+    group: root
+    mode: '0644'
+
+- name: Backup the Chrony configuration file
+  ansible.builtin.copy:
+    src: /etc/default/chrony
+    dest: /etc/default/chrony.orig
+    remote_src: yes
+    force: no
+
+- name: Disable IPv6 in Chrony configuration
+  ansible.builtin.lineinfile:
+    path: /etc/default/chrony
+    regexp: '^DAEMON_OPTS='
+    line: 'DAEMON_OPTS="-4 -F 1"'
+    create: no
+  notify: restart chrony
+
+- name: Get total memory of the system
+  ansible.builtin.setup:
+    filter: ansible_memtotal_mb
+
+- name: Calculate ZFS max ARC size based on RAM
+  set_fact:
+    max_ram: "{{ default_max_ram }}"
+  when: ansible_memtotal_mb | int <= 32768
+
+- name: Set default ZFS max ARC size when RAM is more than 32GB
+  set_fact:
+    max_ram: "{{ default_max_ram_server }}"
+  when: ansible_memtotal_mb | int > 32768
+
+- name: Configure ZFS options
+  ansible.builtin.lineinfile:
+    path: /etc/modprobe.d/zfs.conf
+    regexp: '^options zfs {{ item.key }}='
+    line: "options zfs {{ item.key }}={{ item.value }}"
+    create: yes
+  loop:
+    - { key: "zfs_arc_min", value: "{{ min_ram }}" }
+    - { key: "zfs_arc_max", value: "{{ max_ram }}" }
+    - { key: "zfs_flags", value: "0x10" }
+  register: zfs_config
+  notify: update initramfs
+
+- name: Check if reboot is required
+  ansible.builtin.meta: flush_handlers
+
+- name: Conditionally reboot the server
+  ansible.builtin.reboot:
+  when: zfs_config.changed
+
+- name: Remove the pve/data logical volume
+  community.general.lvol:
+    vg: pve
+    lv: data
+    state: absent
+    force: true
+  register: lv_removal
+
+- name: Expand the pve/root logical volume to use all free space
+  community.general.lvol:
+    vg: pve
+    lv: root
+    size: 100%FREE
+    resizefs: yes
+  when: lv_removal.changed
+
+- name: Resize filesystem on pve/root
+  community.general.filesystem:
+    fstype: ext4
+    dev: /dev/pve/root
+    resizefs: yes
+  when: lv_removal.changed
+      

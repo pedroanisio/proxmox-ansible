@@ -1,0 +1,14 @@
+---
+- hosts: pve_cluster_1
+  become: yes
+
+  vars_files:
+    - /etc/ansible/secret.yml  
+  vars:
+    ansible_user: root  # Set the user to root for SSH
+    min_ram: 1073741824  # 1GB in bytes
+    default_max_ram: 215483648  # 2GB in bytes
+    default_max_ram_server: 8589934592  # 8GB in bytes
+
+  roles:
+    - proxmox

@@ -1,0 +1,49 @@
+
+    - name: Ensure NFS directories exist
+      ansible.builtin.file:
+        path: "{{ item }}"
+        state: directory
+        owner: "{{ vault_username }}"
+        group: "{{ vault_username }}"
+        mode: '0755'
+      loop:
+        - /nfs/bkps
+        - /nfs/iso
+
+    - name: Install autofs
+      ansible.builtin.apt:
+        name: autofs
+        state: present
+        update_cache: yes
+
+    - name: Configure /etc/autofs.conf
+      ansible.builtin.copy:
+        dest: /etc/autofs.conf
+        content: |
+          [ autofs ]
+          master_map_name = /etc/auto.master
+          timeout = 300
+          browse_mode = no
+          [ amd ]
+          dismount_interval = 300
+
+    - name: Configure /etc/auto.master
+      ansible.builtin.copy:
+        dest: /etc/auto.master
+        content: |
+          +dir:/etc/auto.master.d
+          +auto.master
+          /nfs /etc/auto.nfs --timeout=18000 --ghost
+
+    - name: Configure /etc/auto.nfs
+      ansible.builtin.copy:
+        dest: /etc/auto.nfs
+        content: |
+          iso -fstype=nfs,rw,soft,tcp,noatime {{ vault_nfs_server_ip }}:/mnt/data/iso
+          bkps -fstype=nfs,rw,soft,tcp,noatime {{ vault_nfs_server_ip }}:/mnt/data/bkps/proxmox
+
+    - name: Restart autofs service
+      ansible.builtin.systemd:
+        name: autofs
+        state: restarted
+        enabled: yes

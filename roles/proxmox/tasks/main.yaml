@@ -1,0 +1,26 @@
+---
+# Ansible playbook for Proxmox Hypervisor
+# Author: Pedro Anisio Silva
+# Date: 02.dec.2023
+# Email: pedroanisio@arc4d3.com
+
+# Load external
+- name: Prepare the Proxmox VE hosts for operation
+  import_tasks: cluster_init.yaml
+  tags: 
+    - cluster_init
+
+- name: Configure the NFS on the Proxmox VE hosts
+  import_tasks: setup_nfs.yaml
+  tags: 
+    - setup_nfs
+
+- name: Latest kernel headers
+  import_tasks: kernel.yaml
+  tags: 
+    - kernel_headers
+
+- name: Enable NVIDIA drivers on Proxmox VE hosts
+  import_tasks: nvidia.yaml
+  tags: 
+    - addnvidia   

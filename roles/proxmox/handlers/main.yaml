@@ -1,0 +1,22 @@
+- name: update_apt_cache
+  apt:
+    update_cache: yes
+
+- name: restart chrony
+  ansible.builtin.systemd:
+    name: chrony
+    state: restarted
+    
+- name: update initramfs
+  ansible.builtin.shell: update-initramfs -u
+  listen: "update initramfs"
+
+- name: Reboot the machine
+  ansible.builtin.reboot:
+    reboot_timeout: 300  # 5 minutes
+    connect_timeout: 10
+    test_command: uptime  # Could use any command that verifies the system is up
+    pre_reboot_delay: 5
+    post_reboot_delay: 5
+    msg: "Rebooting for system updates"
+  listen: "update initramfs"      

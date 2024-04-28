@@ -1,0 +1,95 @@
+---
+- block:
+    - name: Define variables
+      set_fact:
+        cuda_keyring_package_url: "https://developer.download.nvidia.com/compute/cuda/repos/debian12/x86_64/cuda-keyring_1.1-1_all.deb"
+        cuda_keyring_package_path: "/tmp/cuda-keyring_1.1-1_all.deb"
+
+    - name: Download CUDA keyring package
+      get_url:
+        url: "{{ cuda_keyring_package_url }}"
+        dest: "{{ cuda_keyring_package_path }}"
+        mode: '0644'
+
+    - name: Install CUDA keyring package
+      command: "dpkg -i {{ cuda_keyring_package_path }}"
+
+    - name: Add Debian contrib and non-free repositories
+      apt_repository:
+        repo: "deb http://deb.debian.org/debian/ {{ debian_release | default('bookworm') }} main contrib non-free non-free-firmware"
+        state: present
+
+    - name: Update apt cache after adding repositories
+      apt:
+        update_cache: yes
+
+    - name: Install nvidia-detect package
+      apt:
+        name: nvidia-detect
+        state: latest
+
+    - name: Detect NVIDIA GPU presence
+      command: nvidia-detect
+      register: gpu_detection
+      ignore_errors: true
+
+    - name: Conditionally install NVIDIA drivers if GPU detected
+      apt:
+        name: nvidia-driver
+        state: latest
+      when: '"Detected NVIDIA GPUs" in gpu_detection.stdout'
+
+  tags: addnvidia
+
+# - block:
+#     - name: Detect NVIDIA GPU presence
+#       command: nvidia-detect
+#       register: gpu_detection
+#       ignore_errors: true
+
+#     - name: Retrieve list of NVIDIA-related packages
+#       shell: dpkg-query --show --showformat='${Package}\n' | grep -i nvidia
+#       register: nvidia_packages
+#       changed_when: False
+
+#     - name: Remove and purge NVIDIA-related packages
+#       apt:
+#         name: "{{ item }}"
+#         state: absent
+#         purge: yes
+#       loop: "{{ nvidia_packages.stdout_lines }}"
+#       when: nvidia_packages.stdout_lines | length > 0
+#       notify: update_apt_cache
+
+#     - name: Auto remove unused packages and clean up APT cache
+#       apt:
+#         autoremove: yes
+#         autoclean: yes
+#       when: nvidia_packages.stdout_lines | length > 0
+
+#     - name: Remove NVIDIA repository if exists
+#       lineinfile:
+#         path: "{{ nvidia_drivers_list }}"
+#         line: "{{ nvidia_repo }}"
+#         state: absent
+#       when: '"Detected NVIDIA GPUs" in gpu_detection.stdout'
+#       notify: update_apt_cache
+
+#     - name: Remove NVIDIA GPG key if exists
+#       file:
+#         path: "{{ nvidia_gpg_path }}"
+#         state: absent
+#       when: '"Detected NVIDIA GPUs" in gpu_detection.stdout'
+
+#     - name: Remove nvidia-detect package
+#       apt:
+#         name: nvidia-detect
+#         state: absent
+#       when: '"Detected NVIDIA GPUs" in gpu_detection.stdout'
+
+#     - name: Remove Debian contrib and non-free repositories
+#       apt_repository:
+#         repo: "deb http://deb.debian.org/debian/ {{ debian_release }} main contrib non-free non-free-firmware"
+#         state: absent
+#       when: '"Detected NVIDIA GPUs" in gpu_detection.stdout'
+#   tags: removenvidia
