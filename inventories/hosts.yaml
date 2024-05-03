@@ -1,0 +1,15 @@
+## Proxmox Hypervisor Clusters
+pve_cluster:
+   hosts:
+    storage:
+      ansible_host: 10.0.0.17    
+    beast:
+      ansible_host: 10.0.0.44
+    rog17:
+      ansible_host: 10.0.0.77  
+    higgs:
+      ansible_host: 10.0.0.100
+    alone:
+      ansible_host: 10.0.0.135
+    pve1:
+      ansible_host: 10.0.0.192   
